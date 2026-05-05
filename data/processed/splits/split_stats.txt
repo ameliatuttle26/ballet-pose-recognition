@@ -1,0 +1,23 @@
+Class                                Train    Val   Test  Total
+---------------------------------------------------------------
+BalanceDCLeft                           47     10     10     67
+BalanceDCRight                          69     15     14     98
+CabrioleDerriereLeft                   120     26     25    171
+CabrioleDerriereRight                  247     53     53    353
+CabrioleDevantLeft                      32      7      7     46
+CabrioleDevantRight                    317     68     68    453
+Courus                                1128    242    241   1611
+EchappeSecond                          260     56     55    371
+ExtDerriereOnLeft                      707    152    151   1010
+ExtDerriereOnRight                    1615    346    346   2307
+ExtSecondLeft                          423     91     90    604
+ExtSecondRight                         680    146    145    971
+GrandJeteLeft                          526    113    113    752
+GrandJeteRight                         536    115    115    766
+PirouetteLeft                         4668   1000   1000   6668
+PirouetteRight                        3343    716    717   4776
+SissonneFLeft                           71     15     15    101
+SissonneFRight                          74     16     15    105
+TourEnLair                             976    209    209   1394
+---------------------------------------------------------------
+TOTAL                                15839   3396   3389  22624

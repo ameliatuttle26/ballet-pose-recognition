@@ -1,0 +1,83 @@
+paths:
+  raw_videos: "data/raw/videos"
+  raw_annotations: "/Users/ameliatuttle/Desktop/UJAnnChor-temp/Annotation Files/CSV Original Annotation Files"
+  clips_index: "data/processed/clips.json"
+  keypoints_dir: "data/processed/keypoints"
+  splits_dir: "data/processed/splits"
+  results_dir: "results"
+
+dataset:
+  fps: 25
+  n_frames: 32
+  n_joints: 17
+  min_clip_duration: 0.3
+  only_one_dancer_filter: false
+
+label_map:
+  7:  { name: "BalanceDCRight",         general: "Balance" }
+  8:  { name: "BalanceDCLeft",          general: "Balance" }
+  9:  { name: "Courus",                 general: "Courus" }
+  12: { name: "EchappeSecond",          general: "Echappe" }
+  14: { name: "PirouetteRight",         general: "Pirouette" }
+  15: { name: "ExtDerriereOnRight",     general: "ExtDerriere" }
+  16: { name: "ExtensionSecondRight",   general: "ExtensionSecond" }
+  17: { name: "GrandJeteRight",         general: "GrandJete" }
+
+split:
+  train: 0.70
+  val:   0.15
+  test:  0.15
+  seed: 42
+  stratify_by: "label_fine"
+
+pose:
+  config: "mmpose/configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/hrnet_w32_coco_256x192.py"
+  checkpoint: "mmpose/checkpoints/hrnet_w32_coco_256x192.pth"
+  device: "cuda:0"
+
+train:
+  batch_size: 32
+  epochs: 100
+  lr: 0.001
+  weight_decay: 0.0001
+  patience: 15
+  num_workers: 4
+  seed: 42
+
+experiments:
+  exp1:
+    name: "MLP_xy_fine"
+    model: "MLP"
+    input: "xy"
+    n_frames: 32
+    label_type: "fine"
+  exp2:
+    name: "MLP_xyconf_fine"
+    model: "MLP"
+    input: "xyconf"
+    n_frames: 32
+    label_type: "fine"
+  exp3:
+    name: "TemporalCNN_xyconf_fine"
+    model: "TemporalCNN"
+    input: "xyconf"
+    n_frames: 32
+    label_type: "fine"
+  exp4a:
+    name: "TemporalCNN_xyconf_fine_16f"
+    model: "TemporalCNN"
+    input: "xyconf"
+    n_frames: 16
+    label_type: "fine"
+  exp4b:
+    name: "TemporalCNN_xyconf_fine_32f"
+    model: "TemporalCNN"
+    input: "xyconf"
+    n_frames: 32
+    label_type: "fine"
+  exp5:
+    name: "TemporalCNN_xyconf_general"
+    model: "TemporalCNN"
+    input: "xyconf"
+    n_frames: 32
+    label_type: "general"
