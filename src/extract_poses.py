@@ -22,6 +22,7 @@ import subprocess
 import shutil
 import numpy as np
 from pathlib import Path
+from tqdm import tqdm
 
 
 CKPT_DIR = '/gpfsnyu/home/aat9362/.cache/torch/hub/checkpoints'
@@ -77,17 +78,17 @@ def run_pose(inferencer, frame_paths):
         predictions = result['predictions']
 
         if predictions and len(predictions[0].pred_instances.keypoints) > 0:
-            kps = predictions[0].pred_instances.keypoints[0]       # [17, 2]
-            scores = predictions[0].pred_instances.keypoint_scores[0]  # [17]
+            kps = predictions[0].pred_instances.keypoints[0]
+            scores = predictions[0].pred_instances.keypoint_scores[0]
             kps_with_conf = np.concatenate(
                 [kps, scores[:, None]], axis=1
-            ).astype(np.float32)  # [17, 3]
+            ).astype(np.float32)
         else:
             kps_with_conf = np.zeros((17, 3), dtype=np.float32)
 
         all_keypoints.append(kps_with_conf)
 
-    return np.stack(all_keypoints, axis=0)  # [T, 17, 3]
+    return np.stack(all_keypoints, axis=0)
 
 
 def process_clip(clip, inferencer, config, video_base_dir, keypoints_dir):
@@ -101,9 +102,9 @@ def process_clip(clip, inferencer, config, video_base_dir, keypoints_dir):
     if not video_path.exists():
         return 'missing'
 
-    fps     = config['dataset']['fps']
+    fps      = config['dataset']['fps']
     n_frames = config['dataset']['n_frames']
-    tmp_dir = Path(f'/tmp/ballet_frames/{clip_id}')
+    tmp_dir  = Path(f'/tmp/ballet_frames/{clip_id}')
 
     try:
         frame_paths = extract_frames(
@@ -114,7 +115,7 @@ def process_clip(clip, inferencer, config, video_base_dir, keypoints_dir):
         return 'done'
 
     except Exception as e:
-        print(f"  [ERROR] {clip_id}: {e}")
+        tqdm.write(f"  [ERROR] {clip_id}: {e}")
         return 'error'
 
     finally:
@@ -141,24 +142,27 @@ def main(args):
     if args.limit:
         clips = clips[:args.limit]
 
-    device = 'cuda:0' if not args.cpu else 'cpu'
+    device = 'cpu' if args.cpu else 'cuda:0'
     print(f"Processing {len(clips)} clips from '{args.split}' split on {device}")
 
     print("Loading models...")
     inferencer = load_inferencer(device)
-    print("Models loaded.")
+    print("Models loaded.\n")
 
     counts = {'done': 0, 'skipped': 0, 'missing': 0, 'error': 0}
 
-    for i, clip in enumerate(clips):
-        status = process_clip(clip, inferencer, config, video_base_dir, keypoints_dir)
-        counts[status] += 1
-
-        if (i + 1) % 10 == 0 or (i + 1) == len(clips):
-            print(f"  [{i+1}/{len(clips)}] done={counts['done']} "
-                  f"skipped={counts['skipped']} "
-                  f"error={counts['error']} "
-                  f"missing={counts['missing']}")
+    with tqdm(clips, unit='clip', dynamic_ncols=True) as pbar:
+        for clip in pbar:
+            status = process_clip(
+                clip, inferencer, config, video_base_dir, keypoints_dir
+            )
+            counts[status] += 1
+            pbar.set_postfix(
+                done=counts['done'],
+                skip=counts['skipped'],
+                err=counts['error'],
+                miss=counts['missing'],
+            )
 
     print(f"\nFinished: {counts}")
 
