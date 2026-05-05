@@ -1,11 +1,10 @@
 """
 parse_annotations.py
 ====================
-Step 1 of the pipeline.
 Reads all CSV annotation files and produces a single clips.json index.
 
 Label mapping sourced directly from AnnChorTemplate.json VIA annotator file,
-attribute "BalletSteps" options. This is the authoritative mapping.
+attribute "BalletSteps" options. 
 
 Usage:
     python src/parse_annotations.py --config config.yaml
