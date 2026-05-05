@@ -188,6 +188,8 @@ def build_model(model_name, n_frames, input_dim, n_classes, n_joints=17):
         return TemporalCNN(input_dim=input_dim, n_classes=n_classes)
     elif model_name == 'PoseConv3D':
         return PoseConv3D(n_joints=n_joints, n_classes=n_classes)
+    elif model_name == 'PoseConv3DLarge':
+        return PoseConv3DLarge(n_joints=n_joints, n_classes=n_classes)
     else:
         raise ValueError(f"Unknown model: {model_name}")
 
@@ -199,5 +201,67 @@ def input_dim_for(input_type, n_joints=17):
         return n_joints * 3
     elif input_type == 'heatmap':
         return None  # heatmaps handled separately
+    elif model_name == 'PoseConv3DLarge':
+        return PoseConv3DLarge(n_joints=n_joints, n_classes=n_classes)
     else:
         raise ValueError(f"Unknown input_type: {input_type}")
+
+
+# ------------------------------------------------------------------
+# PoseConv3D Large
+# ------------------------------------------------------------------
+class PoseConv3DLarge(nn.Module):
+    """
+    Larger 3D CNN on stacked Gaussian heatmap volumes.
+    More channels and deeper than PoseConv3D.
+
+    Input:  [B, T, J, H, W]
+    Output: [B, n_classes]
+    """
+    def __init__(self, n_joints=17, n_classes=19, dropout=0.3):
+        super().__init__()
+
+        self.conv1 = nn.Sequential(
+            nn.Conv3d(n_joints, 64, kernel_size=(3,3,3), padding=(1,1,1)),
+            nn.BatchNorm3d(64),
+            nn.ReLU(),
+            nn.MaxPool3d(kernel_size=(1,2,2)),
+        )
+        self.conv2 = nn.Sequential(
+            nn.Conv3d(64, 128, kernel_size=(3,3,3), padding=(1,1,1)),
+            nn.BatchNorm3d(128),
+            nn.ReLU(),
+            nn.MaxPool3d(kernel_size=(2,2,2)),
+        )
+        self.conv3 = nn.Sequential(
+            nn.Conv3d(128, 256, kernel_size=(3,3,3), padding=(1,1,1)),
+            nn.BatchNorm3d(256),
+            nn.ReLU(),
+            nn.MaxPool3d(kernel_size=(2,2,2)),
+        )
+        self.conv4 = nn.Sequential(
+            nn.Conv3d(256, 256, kernel_size=(3,3,3), padding=(1,1,1)),
+            nn.BatchNorm3d(256),
+            nn.ReLU(),
+        )
+
+        self.pool = nn.AdaptiveAvgPool3d(1)
+
+        self.classifier = nn.Sequential(
+            nn.Linear(256, 512),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(256, n_classes),
+        )
+
+    def forward(self, x):
+        x = x.permute(0, 2, 1, 3, 4)  # [B, J, T, H, W]
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        x = self.conv4(x)
+        x = self.pool(x).squeeze(-1).squeeze(-1).squeeze(-1)
+        return self.classifier(x)

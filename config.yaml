@@ -71,3 +71,21 @@ experiments:
     input: "heatmap"
     n_frames: 32
     label_type: "general"
+
+  exp4b:
+    name: "PoseConv3D_fine_lowlr"
+    model: "PoseConv3D"
+    input: "heatmap"
+    n_frames: 32
+    label_type: "fine"
+    lr: 0.0001
+    batch_size: 8
+
+  exp6:
+    name: "PoseConv3D_large_fine"
+    model: "PoseConv3DLarge"
+    input: "heatmap"
+    n_frames: 32
+    label_type: "fine"
+    lr: 0.0001
+    batch_size: 8

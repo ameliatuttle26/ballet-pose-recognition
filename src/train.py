@@ -5,6 +5,7 @@ Training and evaluation script.
 
 Usage:
     python src/train.py --config config.yaml --exp exp1
+    python src/train.py --config config.yaml --exp exp4b
 """
 
 import json
@@ -82,18 +83,26 @@ def main(args):
     print(f"Experiment: {exp_name}")
     print(f"Device: {device}")
 
-    splits_dir = Path(config['paths']['splits_dir'])
+    splits_dir    = Path(config['paths']['splits_dir'])
     keypoints_dir = Path(config['paths']['keypoints_dir'])
-    results_dir = Path(config['paths']['results_dir'])
-    logs_dir = results_dir / 'logs'
-    models_dir = results_dir / 'models'
+    results_dir   = Path(config['paths']['results_dir'])
+    logs_dir      = results_dir / 'logs'
+    models_dir    = results_dir / 'models'
     logs_dir.mkdir(parents=True, exist_ok=True)
     models_dir.mkdir(parents=True, exist_ok=True)
 
-    model_name = exp_config['model']
-    input_type = exp_config['input']
-    n_frames = exp_config.get('n_frames', config['dataset']['n_frames'])
-    label_type = exp_config['label_type']
+    model_name    = exp_config['model']
+    input_type    = exp_config['input']
+    n_frames      = exp_config.get('n_frames', config['dataset']['n_frames'])
+    label_type    = exp_config['label_type']
+    n_joints      = config['dataset']['n_joints']
+    heatmap_size  = config['dataset'].get('heatmap_size', 56)
+    heatmap_sigma = config['dataset'].get('heatmap_sigma', 3.0)
+
+    # Per-experiment overrides
+    lr           = exp_config.get('lr', train_config['lr'])
+    batch_size   = exp_config.get('batch_size', 16 if model_name == 'PoseConv3D' else train_config['batch_size'])
+    patience     = exp_config.get('patience', train_config['patience'])
 
     def make_dataset(split):
         return BalletPoseDataset(
@@ -102,38 +111,41 @@ def main(args):
             label_type=label_type,
             input_type=input_type,
             n_frames=n_frames,
+            heatmap_size=heatmap_size,
+            heatmap_sigma=heatmap_sigma,
         )
 
     train_ds = make_dataset('train')
-    val_ds = make_dataset('val')
-    test_ds = make_dataset('test')
+    val_ds   = make_dataset('val')
+    test_ds  = make_dataset('test')
 
     print(f"Train: {len(train_ds)}, Val: {len(val_ds)}, Test: {len(test_ds)}")
     print(f"Classes: {train_ds.n_classes}")
 
-    train_loader = DataLoader(train_ds, batch_size=train_config['batch_size'],
+    train_loader = DataLoader(train_ds, batch_size=batch_size,
                               shuffle=True, num_workers=train_config['num_workers'])
-    val_loader = DataLoader(val_ds, batch_size=train_config['batch_size'],
-                            shuffle=False, num_workers=train_config['num_workers'])
-    test_loader = DataLoader(test_ds, batch_size=train_config['batch_size'],
-                             shuffle=False, num_workers=train_config['num_workers'])
+    val_loader   = DataLoader(val_ds, batch_size=batch_size,
+                              shuffle=False, num_workers=train_config['num_workers'])
+    test_loader  = DataLoader(test_ds, batch_size=batch_size,
+                              shuffle=False, num_workers=train_config['num_workers'])
 
-    in_dim = input_dim_for(input_type, n_joints=config['dataset']['n_joints'])
-    model = build_model(model_name, n_frames, in_dim, train_ds.n_classes).to(device)
+    in_dim = input_dim_for(input_type, n_joints=n_joints)
+    model  = build_model(model_name, n_frames, in_dim, train_ds.n_classes,
+                         n_joints=n_joints).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Model: {model_name} | Parameters: {n_params:,}")
+    print(f"Model: {model_name} | Parameters: {n_params:,} | LR: {lr}")
 
     class_weights = train_ds.get_class_weights().to(device)
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
-    optimizer = torch.optim.Adam(model.parameters(), lr=train_config['lr'],
-                                 weight_decay=train_config['weight_decay'])
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    criterion  = nn.CrossEntropyLoss(weight=class_weights)
+    optimizer  = torch.optim.Adam(model.parameters(), lr=lr,
+                                   weight_decay=train_config['weight_decay'])
+    scheduler  = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='max', patience=5, factor=0.5, verbose=True)
 
-    best_val_f1 = 0
+    best_val_f1      = 0
     patience_counter = 0
-    history = []
-    best_ckpt = models_dir / f"{exp_name}_best.pt"
+    history          = []
+    best_ckpt        = models_dir / f"{exp_name}_best.pt"
 
     print(f"\n{'Epoch':>6} {'TrLoss':>8} {'TrAcc':>7} {'VaLoss':>8} {'VaAcc':>7} {'VaF1':>7}")
     print('-' * 50)
@@ -146,10 +158,10 @@ def main(args):
         history.append({
             'epoch': epoch,
             'train_loss': round(tr_loss, 4),
-            'train_acc': round(tr_acc, 4),
-            'val_loss': round(va_loss, 4),
-            'val_acc': round(va_acc, 4),
-            'val_f1': round(va_f1, 4),
+            'train_acc':  round(tr_acc, 4),
+            'val_loss':   round(va_loss, 4),
+            'val_acc':    round(va_acc, 4),
+            'val_f1':     round(va_f1, 4),
         })
 
         print(f"{epoch:>6} {tr_loss:>8.4f} {tr_acc:>7.3f} {va_loss:>8.4f} {va_acc:>7.3f} {va_f1:>7.3f}")
@@ -160,7 +172,7 @@ def main(args):
             patience_counter = 0
         else:
             patience_counter += 1
-            if patience_counter >= train_config['patience']:
+            if patience_counter >= patience:
                 print(f"\nEarly stopping at epoch {epoch}")
                 break
 
@@ -172,14 +184,15 @@ def main(args):
     with open(config['paths']['clips_index']) as f:
         clips_data = json.load(f)
     idx_to_label = clips_data[f'idx_to_{label_type}']
-    class_names = [idx_to_label[str(i)] for i in range(train_ds.n_classes)]
+    class_names  = [idx_to_label[str(i)] for i in range(train_ds.n_classes)]
 
     print(f"\n{'='*50}")
     print(f"TEST RESULTS — {exp_name}")
     print(f"  Accuracy:  {test_acc:.4f}")
     print(f"  Macro F1:  {test_f1:.4f}")
     print(f"\nPer-class report:")
-    print(classification_report(test_labels, test_preds, target_names=class_names, zero_division=0))
+    print(classification_report(test_labels, test_preds,
+                                 target_names=class_names, zero_division=0))
 
     cm = confusion_matrix(test_labels, test_preds)
     per_class_f1 = f1_score(test_labels, test_preds, average=None, zero_division=0)
@@ -187,16 +200,16 @@ def main(args):
                          for i in range(len(class_names))}
 
     results = {
-        'experiment': exp_name,
-        'timestamp': datetime.now().isoformat(),
-        'config': exp_config,
-        'n_params': n_params,
-        'test_accuracy': round(test_acc, 4),
-        'test_macro_f1': round(test_f1, 4),
-        'per_class_f1': per_class_results,
+        'experiment':       exp_name,
+        'timestamp':        datetime.now().isoformat(),
+        'config':           exp_config,
+        'n_params':         n_params,
+        'test_accuracy':    round(test_acc, 4),
+        'test_macro_f1':    round(test_f1, 4),
+        'per_class_f1':     per_class_results,
         'confusion_matrix': cm.tolist(),
-        'class_names': class_names,
-        'history': history,
+        'class_names':      class_names,
+        'history':          history,
     }
 
     results_path = logs_dir / f"{exp_name}_results.json"
