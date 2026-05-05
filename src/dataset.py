@@ -4,8 +4,9 @@ dataset.py
 PyTorch Dataset for ballet pose keypoints.
 
 Input representations:
-    'xy'     -> [T, 17*2]  = [T, 34]
-    'xyconf' -> [T, 17*3]  = [T, 51]
+    'xy'      -> [T, 34]      x,y only
+    'xyconf'  -> [T, 51]      x,y,confidence
+    'heatmap' -> [T, J, H, W] stacked Gaussian heatmaps (for PoseConv3D)
 """
 
 import json
@@ -13,16 +14,20 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 from pathlib import Path
+from models import keypoints_to_heatmaps
 
 
 class BalletPoseDataset(Dataset):
     def __init__(self, split_json, keypoints_dir, label_type='fine',
-                 input_type='xyconf', n_frames=32, normalize=True):
-        self.keypoints_dir = Path(keypoints_dir)
-        self.label_type = label_type
-        self.input_type = input_type
-        self.n_frames = n_frames
-        self.normalize = normalize
+                 input_type='xyconf', n_frames=32, normalize=True,
+                 heatmap_size=56, heatmap_sigma=3.0):
+        self.keypoints_dir  = Path(keypoints_dir)
+        self.label_type     = label_type
+        self.input_type     = input_type
+        self.n_frames       = n_frames
+        self.normalize      = normalize
+        self.heatmap_size   = heatmap_size
+        self.heatmap_sigma  = heatmap_sigma
 
         with open(split_json) as f:
             self.clips = json.load(f)
@@ -47,20 +52,32 @@ class BalletPoseDataset(Dataset):
     def __getitem__(self, idx):
         clip = self.clips[idx]
         kp_path = self.keypoints_dir / f"{clip['clip_id']}.npy"
-        keypoints = np.load(kp_path)  # [T, 17, 3]
+        keypoints = np.load(kp_path)           # [T, 17, 3]
         keypoints = self._resample(keypoints, self.n_frames)
 
         if self.normalize:
             keypoints = self._normalize(keypoints)
 
         if self.input_type == 'xy':
-            x = keypoints[:, :, :2].reshape(self.n_frames, -1)   # [T, 34]
+            x = keypoints[:, :, :2].reshape(self.n_frames, -1)  # [T, 34]
+            x = torch.tensor(x, dtype=torch.float32)
+
         elif self.input_type == 'xyconf':
-            x = keypoints.reshape(self.n_frames, -1)              # [T, 51]
+            x = keypoints.reshape(self.n_frames, -1)             # [T, 51]
+            x = torch.tensor(x, dtype=torch.float32)
+
+        elif self.input_type == 'heatmap':
+            hm = keypoints_to_heatmaps(
+                keypoints,
+                h=self.heatmap_size,
+                w=self.heatmap_size,
+                sigma=self.heatmap_sigma,
+            )  # [T, 17, H, W]
+            x = torch.tensor(hm, dtype=torch.float32)
+
         else:
             raise ValueError(f"Unknown input_type: {self.input_type}")
 
-        x = torch.tensor(x, dtype=torch.float32)
         label_key = f'label_{self.label_type}_idx'
         y = torch.tensor(clip[label_key], dtype=torch.long)
         return x, y

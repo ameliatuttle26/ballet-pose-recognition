@@ -12,16 +12,8 @@ dataset:
   n_joints: 17
   min_clip_duration: 0.3
   only_one_dancer_filter: false
-
-label_map:
-  7:  { name: "BalanceDCRight",         general: "Balance" }
-  8:  { name: "BalanceDCLeft",          general: "Balance" }
-  9:  { name: "Courus",                 general: "Courus" }
-  12: { name: "EchappeSecond",          general: "Echappe" }
-  14: { name: "PirouetteRight",         general: "Pirouette" }
-  15: { name: "ExtDerriereOnRight",     general: "ExtDerriere" }
-  16: { name: "ExtensionSecondRight",   general: "ExtensionSecond" }
-  17: { name: "GrandJeteRight",         general: "GrandJete" }
+  heatmap_size: 56
+  heatmap_sigma: 3.0
 
 split:
   train: 0.70
@@ -31,8 +23,8 @@ split:
   stratify_by: "label_fine"
 
 pose:
-  config: "mmpose/configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/hrnet_w32_coco_256x192.py"
-  checkpoint: "mmpose/checkpoints/hrnet_w32_coco_256x192.pth"
+  config: "/gpfsnyu/home/aat9362/.cache/torch/hub/checkpoints/rtmpose-m_8xb256-420e_body8-256x192.py"
+  checkpoint: "/gpfsnyu/home/aat9362/.cache/torch/hub/checkpoints/rtmpose-m_simcc-body7_pt-body7_420e-256x192-e48f03d0_20230504.pth"
   device: "cuda:0"
 
 train:
@@ -51,33 +43,31 @@ experiments:
     input: "xy"
     n_frames: 32
     label_type: "fine"
+
   exp2:
     name: "MLP_xyconf_fine"
     model: "MLP"
     input: "xyconf"
     n_frames: 32
     label_type: "fine"
+
   exp3:
     name: "TemporalCNN_xyconf_fine"
     model: "TemporalCNN"
     input: "xyconf"
     n_frames: 32
     label_type: "fine"
-  exp4a:
-    name: "TemporalCNN_xyconf_fine_16f"
-    model: "TemporalCNN"
-    input: "xyconf"
-    n_frames: 16
-    label_type: "fine"
-  exp4b:
-    name: "TemporalCNN_xyconf_fine_32f"
-    model: "TemporalCNN"
-    input: "xyconf"
+
+  exp4:
+    name: "PoseConv3D_fine"
+    model: "PoseConv3D"
+    input: "heatmap"
     n_frames: 32
     label_type: "fine"
+
   exp5:
-    name: "TemporalCNN_xyconf_general"
-    model: "TemporalCNN"
-    input: "xyconf"
+    name: "PoseConv3D_general"
+    model: "PoseConv3D"
+    input: "heatmap"
     n_frames: 32
     label_type: "general"
