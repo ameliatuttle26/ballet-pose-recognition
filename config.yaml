@@ -89,3 +89,21 @@ experiments:
     label_type: "fine"
     lr: 0.0001
     batch_size: 8
+
+  exp7:
+    name: "PoseConv3D_joint_limb_fine"
+    model: "PoseConv3D"
+    input: "heatmap_joint_limb"
+    n_frames: 32
+    label_type: "fine"
+    lr: 0.0001
+    batch_size: 8
+
+  exp8:
+    name: "PoseSlowOnly_fine"
+    model: "PoseSlowOnly"
+    input: "heatmap_joint_limb"
+    n_frames: 32
+    label_type: "fine"
+    lr: 0.0001
+    batch_size: 8

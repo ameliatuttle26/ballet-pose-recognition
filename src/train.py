@@ -5,7 +5,6 @@ Training and evaluation script.
 
 Usage:
     python src/train.py --config config.yaml --exp exp1
-    python src/train.py --config config.yaml --exp exp4b
 """
 
 import json
@@ -22,7 +21,7 @@ from torch.utils.data import DataLoader
 from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, classification_report
 
 from dataset import BalletPoseDataset
-from models import build_model, input_dim_for
+from models import build_model, input_dim_for, in_channels_for
 
 
 def set_seed(seed):
@@ -36,7 +35,6 @@ def train_epoch(model, loader, optimizer, criterion, device):
     model.train()
     total_loss = 0
     all_preds, all_labels = [], []
-
     for x, y in loader:
         x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
@@ -47,7 +45,6 @@ def train_epoch(model, loader, optimizer, criterion, device):
         total_loss += loss.item() * len(y)
         all_preds.extend(logits.argmax(dim=1).cpu().numpy())
         all_labels.extend(y.cpu().numpy())
-
     return total_loss / len(loader.dataset), accuracy_score(all_labels, all_preds)
 
 
@@ -56,7 +53,6 @@ def eval_epoch(model, loader, criterion, device):
     model.eval()
     total_loss = 0
     all_preds, all_labels = [], []
-
     for x, y in loader:
         x, y = x.to(device), y.to(device)
         logits = model(x)
@@ -64,7 +60,6 @@ def eval_epoch(model, loader, criterion, device):
         total_loss += loss.item() * len(y)
         all_preds.extend(logits.argmax(dim=1).cpu().numpy())
         all_labels.extend(y.cpu().numpy())
-
     avg_loss = total_loss / len(loader.dataset)
     acc = accuracy_score(all_labels, all_preds)
     macro_f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
@@ -100,9 +95,11 @@ def main(args):
     heatmap_sigma = config['dataset'].get('heatmap_sigma', 3.0)
 
     # Per-experiment overrides
-    lr           = exp_config.get('lr', train_config['lr'])
-    batch_size   = exp_config.get('batch_size', 16 if model_name == 'PoseConv3D' else train_config['batch_size'])
-    patience     = exp_config.get('patience', train_config['patience'])
+    lr         = exp_config.get('lr', train_config['lr'])
+    batch_size = exp_config.get('batch_size',
+                    16 if model_name in ('PoseConv3D', 'PoseConv3DLarge', 'PoseSlowOnly')
+                    else train_config['batch_size'])
+    patience   = exp_config.get('patience', train_config['patience'])
 
     def make_dataset(split):
         return BalletPoseDataset(
@@ -129,11 +126,12 @@ def main(args):
     test_loader  = DataLoader(test_ds, batch_size=batch_size,
                               shuffle=False, num_workers=train_config['num_workers'])
 
-    in_dim = input_dim_for(input_type, n_joints=n_joints)
-    model  = build_model(model_name, n_frames, in_dim, train_ds.n_classes,
-                         n_joints=n_joints).to(device)
+    in_dim      = input_dim_for(input_type, n_joints=n_joints)
+    in_channels = in_channels_for(input_type, n_joints=n_joints)
+    model       = build_model(model_name, n_frames, in_dim, train_ds.n_classes,
+                              n_joints=n_joints, in_channels=in_channels).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Model: {model_name} | Parameters: {n_params:,} | LR: {lr}")
+    print(f"Model: {model_name} | Params: {n_params:,} | LR: {lr} | Batch: {batch_size}")
 
     class_weights = train_ds.get_class_weights().to(device)
     criterion  = nn.CrossEntropyLoss(weight=class_weights)
@@ -155,14 +153,9 @@ def main(args):
         va_loss, va_acc, va_f1, _, _ = eval_epoch(model, val_loader, criterion, device)
         scheduler.step(va_f1)
 
-        history.append({
-            'epoch': epoch,
-            'train_loss': round(tr_loss, 4),
-            'train_acc':  round(tr_acc, 4),
-            'val_loss':   round(va_loss, 4),
-            'val_acc':    round(va_acc, 4),
-            'val_f1':     round(va_f1, 4),
-        })
+        history.append({'epoch': epoch, 'train_loss': round(tr_loss, 4),
+                        'train_acc': round(tr_acc, 4), 'val_loss': round(va_loss, 4),
+                        'val_acc': round(va_acc, 4), 'val_f1': round(va_f1, 4)})
 
         print(f"{epoch:>6} {tr_loss:>8.4f} {tr_acc:>7.3f} {va_loss:>8.4f} {va_acc:>7.3f} {va_f1:>7.3f}")
 
@@ -176,7 +169,7 @@ def main(args):
                 print(f"\nEarly stopping at epoch {epoch}")
                 break
 
-    print(f"\nLoading best checkpoint from {best_ckpt}")
+    print(f"\nLoading best checkpoint: {best_ckpt}")
     model.load_state_dict(torch.load(best_ckpt, map_location=device))
     _, test_acc, test_f1, test_preds, test_labels = eval_epoch(
         model, test_loader, criterion, device)
@@ -196,20 +189,14 @@ def main(args):
 
     cm = confusion_matrix(test_labels, test_preds)
     per_class_f1 = f1_score(test_labels, test_preds, average=None, zero_division=0)
-    per_class_results = {class_names[i]: round(float(per_class_f1[i]), 4)
-                         for i in range(len(class_names))}
 
     results = {
-        'experiment':       exp_name,
-        'timestamp':        datetime.now().isoformat(),
-        'config':           exp_config,
-        'n_params':         n_params,
-        'test_accuracy':    round(test_acc, 4),
-        'test_macro_f1':    round(test_f1, 4),
-        'per_class_f1':     per_class_results,
-        'confusion_matrix': cm.tolist(),
-        'class_names':      class_names,
-        'history':          history,
+        'experiment': exp_name, 'timestamp': datetime.now().isoformat(),
+        'config': exp_config, 'n_params': n_params,
+        'test_accuracy': round(test_acc, 4), 'test_macro_f1': round(test_f1, 4),
+        'per_class_f1': {class_names[i]: round(float(per_class_f1[i]), 4)
+                         for i in range(len(class_names))},
+        'confusion_matrix': cm.tolist(), 'class_names': class_names, 'history': history,
     }
 
     results_path = logs_dir / f"{exp_name}_results.json"

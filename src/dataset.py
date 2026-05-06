@@ -4,9 +4,11 @@ dataset.py
 PyTorch Dataset for ballet pose keypoints.
 
 Input representations:
-    'xy'      -> [T, 34]      x,y only
-    'xyconf'  -> [T, 51]      x,y,confidence
-    'heatmap' -> [T, J, H, W] stacked Gaussian heatmaps (for PoseConv3D)
+    'xy'                 -> [T, 34]
+    'xyconf'             -> [T, 51]
+    'heatmap'            -> [T, 17, H, W]
+    'heatmap_limb'       -> [T, 16, H, W]
+    'heatmap_joint_limb' -> [T, 33, H, W]
 """
 
 import json
@@ -14,7 +16,8 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 from pathlib import Path
-from models import keypoints_to_heatmaps
+from models import (keypoints_to_heatmaps, keypoints_to_limb_heatmaps,
+                    keypoints_to_joint_limb_heatmaps)
 
 
 class BalletPoseDataset(Dataset):
@@ -34,8 +37,7 @@ class BalletPoseDataset(Dataset):
 
         available = []
         for clip in self.clips:
-            kp_path = self.keypoints_dir / f"{clip['clip_id']}.npy"
-            if kp_path.exists():
+            if (self.keypoints_dir / f"{clip['clip_id']}.npy").exists():
                 available.append(clip)
 
         n_missing = len(self.clips) - len(available)
@@ -51,30 +53,30 @@ class BalletPoseDataset(Dataset):
 
     def __getitem__(self, idx):
         clip = self.clips[idx]
-        kp_path = self.keypoints_dir / f"{clip['clip_id']}.npy"
-        keypoints = np.load(kp_path)           # [T, 17, 3]
+        keypoints = np.load(self.keypoints_dir / f"{clip['clip_id']}.npy")
         keypoints = self._resample(keypoints, self.n_frames)
 
         if self.normalize:
             keypoints = self._normalize(keypoints)
 
         if self.input_type == 'xy':
-            x = keypoints[:, :, :2].reshape(self.n_frames, -1)  # [T, 34]
-            x = torch.tensor(x, dtype=torch.float32)
-
+            x = torch.tensor(keypoints[:, :, :2].reshape(self.n_frames, -1),
+                             dtype=torch.float32)
         elif self.input_type == 'xyconf':
-            x = keypoints.reshape(self.n_frames, -1)             # [T, 51]
-            x = torch.tensor(x, dtype=torch.float32)
-
+            x = torch.tensor(keypoints.reshape(self.n_frames, -1),
+                             dtype=torch.float32)
         elif self.input_type == 'heatmap':
-            hm = keypoints_to_heatmaps(
-                keypoints,
-                h=self.heatmap_size,
-                w=self.heatmap_size,
-                sigma=self.heatmap_sigma,
-            )  # [T, 17, H, W]
-            x = torch.tensor(hm, dtype=torch.float32)
-
+            x = torch.tensor(keypoints_to_heatmaps(
+                keypoints, self.heatmap_size, self.heatmap_size,
+                self.heatmap_sigma), dtype=torch.float32)
+        elif self.input_type == 'heatmap_limb':
+            x = torch.tensor(keypoints_to_limb_heatmaps(
+                keypoints, self.heatmap_size, self.heatmap_size,
+                self.heatmap_sigma), dtype=torch.float32)
+        elif self.input_type == 'heatmap_joint_limb':
+            x = torch.tensor(keypoints_to_joint_limb_heatmaps(
+                keypoints, self.heatmap_size, self.heatmap_size,
+                self.heatmap_sigma), dtype=torch.float32)
         else:
             raise ValueError(f"Unknown input_type: {self.input_type}")
 
@@ -94,14 +96,13 @@ class BalletPoseDataset(Dataset):
 
     def _normalize(self, keypoints):
         conf = keypoints[:, :, 2]
-        visible = conf > 0.1
         xy = keypoints[:, :, :2].copy()
+        visible = conf > 0.1
         if visible.any():
             visible_xy = xy[visible]
             xy_min = visible_xy.min(axis=0)
             xy_max = visible_xy.max(axis=0)
-            rng = xy_max - xy_min
-            rng[rng == 0] = 1
+            rng = np.where(xy_max - xy_min == 0, 1, xy_max - xy_min)
             xy = (xy - xy_min) / rng
         keypoints = keypoints.copy()
         keypoints[:, :, :2] = xy
